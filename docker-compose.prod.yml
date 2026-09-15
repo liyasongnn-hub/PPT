@@ -82,7 +82,7 @@ services:
   # 建议生产固定到具体 RELEASE 标签（例如 minio/minio:RELEASE.2025-xx-xx）
   minio:
     <<: *service-defaults
-    image: minio/minio:latest
+    image: quay.io/minio/minio:latest
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY}
@@ -107,7 +107,7 @@ services:
 
   minio-init:
     <<: *service-defaults
-    image: minio/mc:latest
+    image: quay.io/minio/mc:latest
     restart: "no"
     depends_on:
       minio:
