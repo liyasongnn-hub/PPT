@@ -10,7 +10,7 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Install any needed packages specified in requirements.txt
-RUN pip install -r requirements.txt -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
+RUN pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
 
 # Copy the rest of the application's code into the container at /app
 RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin appuser
