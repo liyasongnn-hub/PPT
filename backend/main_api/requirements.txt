@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+google-adk==1.5.0
+httpx
+a2a-sdk==0.2.10
+python-dotenv
+python-multipart
+asyncclick
+pytest
+click
+sqlalchemy>=2.0
+asyncpg
+aiosqlite
+alembic
+redis>=5
+minio

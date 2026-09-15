@@ -1,0 +1,56 @@
+# Never send credentials or local overrides to a Docker build context.
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Version-control and editor metadata
+.git/
+.github/
+.gitignore
+.idea/
+.vscode/
+.DS_Store
+
+# Local Python environments, caches, tests and reports
+.venv/
+venv/
+**/.venv/
+**/venv/
+**/__pycache__/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.py[cod]
+
+# Frontend dependencies and generated output
+**/node_modules/
+frontend/.vite-cache/
+frontend/.npm-cache/
+frontend/dist/
+npm-debug.log*
+yarn-error.log*
+
+# Runtime data must be supplied through named volumes in production.
+data/
+logs/
+**/cache/
+**/temp_download/
+**/output_pdf/
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.pid
+*.pptx
+*.pdf
+
+# Local scratch files
+.run/
+.tmp/
+tmp/
+*.swp
+*.tmp

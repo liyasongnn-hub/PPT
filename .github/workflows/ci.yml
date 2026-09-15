@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secret-hygiene:
+    name: Secret hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reject tracked environment files and likely API keys
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tracked_env="$(git ls-files | grep -E '(^|/)\.env($|\.)' || true)"
+          if [[ -n "$tracked_env" ]]; then
+            echo "Tracked environment files are forbidden:"
+            printf '%s\n' "$tracked_env"
+            exit 1
+          fi
+
+          key_files="$(git grep -IlE '(sk-[A-Za-z0-9_-]{24,}|AIza[0-9A-Za-z_-]{30,}|gh[pousr]_[A-Za-z0-9]{30,})' -- . ':!package-lock.json' || true)"
+          if [[ -n "$key_files" ]]; then
+            echo "Possible credential material found in tracked files:"
+            printf '%s\n' "$key_files"
+            echo "Only file names are shown to avoid exposing the matched value."
+            exit 1
+          fi
+
+  backend:
+    name: Backend checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compile Python sources
+        run: python -m compileall -q backend
+
+  frontend:
+    name: Frontend checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run type-check
+
+      - name: Build production assets
+        run: npm run build-only
+
+  compose:
+    name: Compose validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      JWT_SECRET: ci-only-jwt-secret-that-is-never-used-outside-validation
+      PERSONALDB_INTERNAL_TOKEN: ci-only-internal-token-that-is-never-used-outside-validation
+      DEEPSEEK_API_KEY: ci-only-deepseek-placeholder
+      ALI_API_KEY: ci-only-aliyun-placeholder
+      CORS_ORIGINS: https://example.invalid
+      POSTGRES_PASSWORD: ci-only-postgres-password
+      REDIS_PASSWORD: ci-only-redis-password
+      MINIO_ACCESS_KEY: ci-only-minio-user
+      MINIO_SECRET_KEY: ci-only-minio-password
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Create placeholder .env for dev compose env_file
+        run: printf 'EMBEDDING_PROVIDER=aliyun\nEMBEDDING_MODEL=text-embedding-v3\nALI_API_KEY=ci-placeholder\n' > .env
+
+      - name: Validate development Compose file
+        run: docker compose -f docker-compose.yml config --quiet
+
+      - name: Validate production Compose file
+        run: docker compose -f docker-compose.prod.yml config --quiet
+
+      - name: Verify only the frontend publishes a port (prod)
+        shell: bash
+        run: |
+          set -euo pipefail
+          rendered="$(docker compose -f docker-compose.prod.yml config --format json)"
+          python -c 'import json,sys; services=json.load(sys.stdin)["services"]; exposed=[name for name,svc in services.items() if svc.get("ports")]; assert exposed == ["frontend"], f"only frontend may publish ports, got: {exposed}"' <<< "$rendered"

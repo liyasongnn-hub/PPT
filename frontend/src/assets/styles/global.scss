@@ -1,0 +1,163 @@
+/* 落日橙主题调色板：全局唯一色源，平台页面统一引用 */
+:root {
+  --sun-900: #241209;
+  --sun-800: #3d1f0e;
+  --sun-700: #7a3b0d;
+  --sun-600: #c24e08;
+  --sun-500: #e8620a;
+  --sun-400: #ff7a18;
+  --sun-300: #ffa94d;
+  --sun-200: #ffce9e;
+  --sun-100: #ffe7d4;
+  --sun-50: #fff6ef;
+  --sun-25: #fffbf7;
+
+  --sun-ink: #3a2a20;
+  --sun-ink-soft: #5c4536;
+  --sun-muted: #8b7568;
+  --sun-muted-light: #a79184;
+  --sun-line: #efdfd1;
+  --sun-line-soft: #f6ebe1;
+
+  --sun-grad: linear-gradient(135deg, #ff7a18 0%, #e8620a 100%);
+  --sun-grad-soft: linear-gradient(135deg, #ff7a18 0%, #ffa94d 100%);
+  --sun-grad-dark: linear-gradient(165deg, #241209 0%, #4a2410 55%, #7a3b0d 100%);
+}
+
+html, body, div, span, applet, object, iframe,
+h1, h2, h3, h4, h5, h6, p, blockquote, pre,
+a, abbr, acronym, address, big, cite, code,
+del, dfn, em, img, ins, kbd, q, s, samp,
+small, strike, strong, sub, sup, tt, var,
+b, u, i, center,
+dl, dt, dd, ol, ul, li,
+fieldset, form, label, legend,
+table, caption, tbody, tfoot, thead, tr, th, td,
+article, aside, canvas, details, embed,
+figure, figcaption, footer, header, hgroup,
+menu, nav, output, ruby, section, summary,
+time, mark, audio, video {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: 100%;
+  vertical-align: baseline;
+  box-sizing: border-box;
+}
+
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+article,
+aside,
+details,
+figcaption,
+figure,
+footer,
+header,
+hgroup,
+menu,
+nav,
+section {
+  display: block;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  background-color: #fff;
+  color: $textColor;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
+}
+
+ol,
+ul {
+  list-style: none;
+}
+
+blockquote, q {
+  quotes: none;
+}
+
+blockquote::before,
+blockquote::after,
+q::before,
+q::after {
+  content: '';
+}
+
+table {
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+
+a {
+  text-decoration: none;
+  color: $themeColor;
+}
+
+img {
+  vertical-align: middle;
+  border-style: none;
+}
+
+hr {
+  box-sizing: content-box;
+  height: 0;
+  overflow: visible;
+}
+
+mark.active {
+  background-color: #ff9632;
+}
+
+input,
+button,
+select,
+optgroup,
+textarea {
+  color: inherit;
+}
+
+button,
+input {
+  overflow: visible;
+}
+
+button,
+select {
+  text-transform: none;
+}
+
+textarea {
+  overflow: auto;
+  resize: vertical;
+}
+
+a,
+area,
+button,
+[role='button'],
+input:not([type='range']),
+label,
+select,
+summary,
+textarea {
+  touch-action: manipulation;
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+  background-color: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: #e1e1e1;
+  border-radius: 3px;
+}

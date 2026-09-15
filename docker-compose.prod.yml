@@ -1,0 +1,473 @@
+name: ppt-agent
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+  networks:
+    - backend
+
+# PostgreSQL / Redis / MinIO 连接参数，供 main_api、worker、scheduler、migration 复用。
+# 连接串由 compose 从 POSTGRES_* / REDIS_PASSWORD / MINIO_* 派生，单一事实来源，
+# 避免 .env 里两处密码不一致。密码务必为 URL 安全字符（不含 @ : / # %）。
+x-data-env: &data-env
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ppt}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ppt_platform}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+  MINIO_ENDPOINT: minio:9000
+  MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY}
+  MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY}
+  MINIO_SECURE: "false"
+  FILE_SIGNED_URL_TTL: ${FILE_SIGNED_URL_TTL:-900}
+
+services:
+  postgres:
+    <<: *service-defaults
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ppt}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-ppt_platform}
+      # 显式指定数据子目录，兼容 postgres 官方镜像新旧两种卷布局
+      PGDATA: /var/lib/postgresql/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    tmpfs:
+      - /run/postgresql:size=64m,noexec,nosuid
+      - /tmp:size=64m,noexec,nosuid
+    read_only: true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    cpus: ${POSTGRES_CPUS:-1.0}
+    mem_limit: ${POSTGRES_MEMORY_LIMIT:-512m}
+    stop_grace_period: 60s
+
+  redis:
+    <<: *service-defaults
+    image: redis:7-alpine
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    cpus: ${REDIS_CPUS:-0.5}
+    mem_limit: ${REDIS_MEMORY_LIMIT:-256m}
+    stop_grace_period: 30s
+
+  # 建议生产固定到具体 RELEASE 标签（例如 minio/minio:RELEASE.2025-xx-xx）
+  minio:
+    <<: *service-defaults
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY}
+    volumes:
+      - minio_data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    cpus: ${MINIO_CPUS:-1.0}
+    mem_limit: ${MINIO_MEMORY_LIMIT:-512m}
+    stop_grace_period: 30s
+
+  minio-init:
+    <<: *service-defaults
+    image: minio/mc:latest
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+        restart: true
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
+        mc mb --ignore-existing local/exports local/uploads &&
+        echo "minio buckets ready"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY}
+    cap_drop:
+      - ALL
+    pids_limit: 64
+
+  migration:
+    <<: *service-defaults
+    build:
+      context: ./backend/main_api
+      dockerfile: Dockerfile
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      <<: *data-env
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+        restart: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    cap_drop:
+      - ALL
+    pids_limit: 128
+
+  personaldb:
+    <<: *service-defaults
+    build:
+      context: ./backend/personaldb
+      dockerfile: Dockerfile
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-aliyun}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-v3}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-0}
+      ALI_API_KEY: ${ALI_API_KEY:?Set ALI_API_KEY in the deployment environment}
+      USE_MINERU: ${USE_MINERU:-false}
+      CHROMA_DB_DIR: /app/cache/chromadb
+      PERSONALDB_CACHE_ENABLED: ${PERSONALDB_CACHE_ENABLED:-false}
+      PERSONALDB_CACHE_DIR: /app/cache/function-results
+      PERSONALDB_TEMP_DIR: /app/temp_download
+      PERSONALDB_REQUIRE_INTERNAL_AUTH: "true"
+      PERSONALDB_INTERNAL_TOKEN: ${PERSONALDB_INTERNAL_TOKEN:?Set a random PERSONALDB_INTERNAL_TOKEN of at least 32 characters}
+      PERSONALDB_MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-20971520}
+      PERSONALDB_MAX_REMOTE_BYTES: ${MAX_REMOTE_BYTES:-20971520}
+      PERSONALDB_MAX_REMOTE_DOWNLOAD_SECONDS: ${MAX_REMOTE_DOWNLOAD_SECONDS:-120}
+      PERSONALDB_MAX_TEXT_CHARS: ${MAX_TEXT_CHARS:-200000}
+      PERSONALDB_MAX_QUERY_CHARS: ${MAX_QUERY_CHARS:-10000}
+      PERSONALDB_MAX_EXTRACTED_TEXT_CHARS: ${MAX_EXTRACTED_TEXT_CHARS:-2000000}
+      PERSONALDB_MAX_DOCUMENT_CHUNKS: ${MAX_DOCUMENT_CHUNKS:-500}
+      PERSONALDB_URL_ALLOWLIST: ${PERSONALDB_URL_ALLOWLIST:-}
+      PERSONALDB_ALLOWED_FILE_TYPES: ${PERSONALDB_ALLOWED_FILE_TYPES:-pdf,doc,docx,ppt,pptx,xls,xlsx,csv,txt,md,markdown,html,htm,json,xml,rtf,epub}
+    volumes:
+      - personaldb_data:/app/cache
+    tmpfs:
+      - /tmp:size=128m,noexec,nosuid
+      - /app/temp_download:size=256m,noexec,nosuid,uid=10001,gid=10001,mode=700
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9100/health/live', timeout=3).read(1)"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    cap_drop:
+      - ALL
+    read_only: true
+    pids_limit: 256
+    cpus: ${PERSONALDB_CPUS:-2.0}
+    mem_limit: ${PERSONALDB_MEMORY_LIMIT:-2g}
+    stop_grace_period: 30s
+
+  outline_api:
+    <<: *service-defaults
+    build:
+      context: ./backend/simpleOutline
+      dockerfile: Dockerfile
+    command:
+      - python
+      - main_api.py
+      - --host
+      - 0.0.0.0
+      - --port
+      - "10001"
+      - --agent_url
+      - http://outline_api:10001/
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-deepseek}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?Set DEEPSEEK_API_KEY in the deployment environment}
+      OUTLINE_STREAMING: ${OUTLINE_STREAMING:-true}
+    tmpfs:
+      - /tmp:size=128m,noexec,nosuid
+      - /app/cache:size=256m,noexec,nosuid,uid=10001,gid=10001,mode=700
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:10001/.well-known/agent.json', timeout=3).read(1)"]
+      interval: 20s
+      timeout: 5s
+      retries: 8
+      start_period: 45s
+    cap_drop:
+      - ALL
+    read_only: true
+    pids_limit: 256
+    cpus: ${OUTLINE_CPUS:-1.5}
+    mem_limit: ${OUTLINE_MEMORY_LIMIT:-1536m}
+    stop_grace_period: 45s
+
+  content_api:
+    <<: *service-defaults
+    build:
+      context: ./backend/slide_agent
+      dockerfile: Dockerfile
+    command:
+      - python
+      - main_api.py
+      - --host
+      - 0.0.0.0
+      - --port
+      - "10011"
+      - --agent_url
+      - http://content_api:10011/
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PPT_WRITER_PROVIDER: ${PPT_WRITER_PROVIDER:-deepseek}
+      PPT_WRITER_MODEL: ${PPT_WRITER_MODEL:-deepseek-chat}
+      PPT_CHECKER_PROVIDER: ${PPT_CHECKER_PROVIDER:-deepseek}
+      PPT_CHECKER_MODEL: ${PPT_CHECKER_MODEL:-deepseek-chat}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?Set DEEPSEEK_API_KEY in the deployment environment}
+      CONTENT_STREAMING: ${CONTENT_STREAMING:-false}
+      PERSONAL_DB: http://personaldb:9100
+      PERSONALDB_INTERNAL_TOKEN: ${PERSONALDB_INTERNAL_TOKEN:?Set a random PERSONALDB_INTERNAL_TOKEN of at least 32 characters}
+      PEXELS_API_KEY: ${PEXELS_API_KEY:-}
+      USE_CHART: ${USE_CHART:-true}
+    depends_on:
+      personaldb:
+        condition: service_healthy
+        restart: true
+    tmpfs:
+      - /tmp:size=128m,noexec,nosuid
+      - /app/cache:size=256m,noexec,nosuid,uid=10001,gid=10001,mode=700
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:10011/.well-known/agent.json', timeout=3).read(1)"]
+      interval: 20s
+      timeout: 5s
+      retries: 8
+      start_period: 45s
+    cap_drop:
+      - ALL
+    pids_limit: 320
+    cpus: ${CONTENT_CPUS:-2.0}
+    mem_limit: ${CONTENT_MEMORY_LIMIT:-2560m}
+    stop_grace_period: 60s
+
+  main_api:
+    <<: *service-defaults
+    build:
+      context: ./backend/main_api
+      dockerfile: Dockerfile
+    environment:
+      <<: *data-env
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      HOST: 0.0.0.0
+      MAIN_API_PORT: "6800"
+      OUTLINE_API: http://outline_api:10001
+      CONTENT_API: http://content_api:10011
+      PERSONAL_DB: http://personaldb:9100
+      PERSONALDB_INTERNAL_TOKEN: ${PERSONALDB_INTERNAL_TOKEN:?Set a random PERSONALDB_INTERNAL_TOKEN of at least 32 characters}
+      PLATFORM_DATA_DIR: /data
+      JWT_SECRET: ${JWT_SECRET:?Set a random JWT_SECRET of at least 32 characters}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS to the public HTTPS application origin}
+      TRUST_PROXY_HEADERS: "true"
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-20971520}
+      MAX_EXPORT_BYTES: ${MAX_EXPORT_BYTES:-52428800}
+      MAX_PROJECT_DOCUMENT_BYTES: ${MAX_PROJECT_DOCUMENT_BYTES:-15728640}
+      MAX_PROXY_BYTES: ${MAX_PROXY_BYTES:-15728640}
+      PROXY_ALLOWED_HOSTS: ${PROXY_ALLOWED_HOSTS:-images.pexels.com,images.unsplash.com,source.unsplash.com}
+    depends_on:
+      postgres:
+        condition: service_healthy
+        restart: true
+      redis:
+        condition: service_healthy
+        restart: true
+      minio:
+        condition: service_healthy
+        restart: true
+      migration:
+        condition: service_completed_successfully
+        restart: true
+      personaldb:
+        condition: service_healthy
+        restart: true
+      outline_api:
+        condition: service_healthy
+        restart: true
+      content_api:
+        condition: service_healthy
+        restart: true
+    tmpfs:
+      - /tmp:size=128m,noexec,nosuid
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:6800/health/live', timeout=3).read(1)"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    cap_drop:
+      - ALL
+    read_only: true
+    pids_limit: 256
+    cpus: ${MAIN_API_CPUS:-1.0}
+    mem_limit: ${MAIN_API_MEMORY_LIMIT:-768m}
+    stop_grace_period: 45s
+
+  worker:
+    <<: *service-defaults
+    build:
+      context: ./backend/main_api
+      dockerfile: Dockerfile
+    command: ["python", "worker.py"]
+    environment:
+      <<: *data-env
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PLATFORM_DATA_DIR: /data
+      WORKER_CONSUMERS: ${WORKER_CONSUMERS:-2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+        restart: true
+      redis:
+        condition: service_healthy
+        restart: true
+      migration:
+        condition: service_completed_successfully
+        restart: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,noexec,nosuid
+    cap_drop:
+      - ALL
+    pids_limit: 320
+    cpus: ${WORKER_CPUS:-2.0}
+    mem_limit: ${WORKER_MEMORY_LIMIT:-1024m}
+    stop_grace_period: 60s
+
+  scheduler:
+    <<: *service-defaults
+    build:
+      context: ./backend/main_api
+      dockerfile: Dockerfile
+    command: ["python", "scheduler.py"]
+    environment:
+      <<: *data-env
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PLATFORM_DATA_DIR: /data
+      SCHEDULER_INTERVAL: ${SCHEDULER_INTERVAL:-60}
+      SCHEDULER_STALE_RUNNING_SECONDS: ${SCHEDULER_STALE_RUNNING_SECONDS:-120}
+      SCHEDULER_STALE_QUEUED_SECONDS: ${SCHEDULER_STALE_QUEUED_SECONDS:-600}
+      SCHEDULER_RETENTION_DAYS: ${SCHEDULER_RETENTION_DAYS:-14}
+    depends_on:
+      postgres:
+        condition: service_healthy
+        restart: true
+      migration:
+        condition: service_completed_successfully
+        restart: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    cpus: ${SCHEDULER_CPUS:-0.5}
+    mem_limit: ${SCHEDULER_MEMORY_LIMIT:-256m}
+    stop_grace_period: 15s
+
+  backup:
+    <<: *service-defaults
+    image: postgres:16-alpine
+    entrypoint: ["/bin/sh", "/scripts/backup-entrypoint.sh"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ppt}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-ppt_platform}
+      BACKUP_INTERVAL: ${BACKUP_INTERVAL:-86400}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+    volumes:
+      - ./scripts:/scripts:ro
+      - backup_data:/backups
+      - personaldb_data:/chroma_data:rw
+      - minio_data:/minio_data:rw
+    depends_on:
+      postgres:
+        condition: service_healthy
+        restart: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    cpus: ${BACKUP_CPUS:-0.5}
+    mem_limit: ${BACKUP_MEMORY_LIMIT:-256m}
+    stop_grace_period: 15s
+
+  frontend:
+    <<: *service-defaults
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      main_api:
+        condition: service_healthy
+        restart: true
+    ports:
+      - "${APP_BIND_ADDRESS:-0.0.0.0}:${APP_PORT:-8008}:80"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    pids_limit: 128
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+      - /var/cache/nginx:size=32m,noexec,nosuid
+      - /var/run:size=8m,nosuid
+    cpus: ${FRONTEND_CPUS:-0.5}
+    mem_limit: ${FRONTEND_MEMORY_LIMIT:-256m}
+    stop_grace_period: 15s
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  backup_data:
+  personaldb_data:

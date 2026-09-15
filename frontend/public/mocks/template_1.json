@@ -1,0 +1,91 @@
+{
+  "slides": [
+    {
+      "id": "slide-1",
+      "type": "cover",
+      "elements": [
+        {
+          "id": "element-1",
+          "type": "text",
+          "left": 100,
+          "top": 100,
+          "width": 800,
+          "height": 50,
+          "content": "",
+          "textType": "title"
+        },
+        {
+          "id": "element-2",
+          "type": "text",
+          "left": 100,
+          "top": 200,
+          "width": 800,
+          "height": 30,
+          "content": "",
+          "textType": "content"
+        }
+      ],
+      "background": {
+        "type": "solid",
+        "color": "#ffffff"
+      }
+    },
+    {
+      "id": "slide-2",
+      "type": "content",
+      "elements": [
+        {
+          "id": "element-3",
+          "type": "text",
+          "left": 100,
+          "top": 100,
+          "width": 800,
+          "height": 50,
+          "content": "",
+          "textType": "title"
+        },
+        {
+          "id": "element-4",
+          "type": "text",
+          "left": 100,
+          "top": 200,
+          "width": 800,
+          "height": 200,
+          "content": "",
+          "textType": "content"
+        }
+      ],
+      "background": {
+        "type": "solid",
+        "color": "#ffffff"
+      }
+    },
+    {
+      "id": "slide-3",
+      "type": "end",
+      "elements": [
+        {
+          "id": "element-5",
+          "type": "text",
+          "left": 100,
+          "top": 100,
+          "width": 800,
+          "height": 50,
+          "content": "",
+          "textType": "title"
+        }
+      ],
+      "background": {
+        "type": "solid",
+        "color": "#ffffff"
+      }
+    }
+  ],
+  "theme": {
+    "id": "theme-1",
+    "name": "默认主题",
+    "backgroundColor": "#ffffff",
+    "fontColor": "#333333",
+    "fontFamily": "sans-serif"
+  }
+}
