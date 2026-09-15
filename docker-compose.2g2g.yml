@@ -1,0 +1,41 @@
+# 2 核 2GB 轻量服务器精简 overlay。
+#
+# 用法：与基准生产文件叠加使用（不是独立文件）：
+#   docker compose --env-file .env -f docker-compose.prod.yml -f docker-compose.2g2g.yml up -d --build
+#
+# 它覆盖基准文件里的几个「省内存」点，目标是让 13 个容器在 2GB 内存里跑起来：
+#   * 停掉 scheduler / backup（非必需；故障转移与自动备份在单机测试期可省，省 ~256m×2）
+#   * worker 消费并发降为 1（省一个生成协程的内存与 CPU）
+#   * content_api / personaldb 收紧内存上限，避免超过 2GB 物理内存被 OOM 杀掉
+#   * redis / postgres / minio 保持只读 + tmpfs，本 overlay 不改其安全基线
+#
+# 注意：schedule/backup 被设 profile 置为「默认不启动」，但保留了定义，
+# 需要时可 `--profile full` 临时拉起：
+#   docker compose --env-file .env -f docker-compose.prod.yml -f docker-compose.2g2g.yml --profile full up -d
+
+services:
+  scheduler:
+    profiles: ["full"]
+
+  backup:
+    profiles: ["full"]
+
+  worker:
+    environment:
+      WORKER_CONSUMERS: "1"
+    mem_limit: 512m
+    cpus: 1.0
+
+  content_api:
+    mem_limit: 1024m
+    cpus: 1.0
+
+  personaldb:
+    mem_limit: 768m
+    cpus: 1.0
+
+  main_api:
+    mem_limit: 512m
+
+  outline_api:
+    mem_limit: 512m
