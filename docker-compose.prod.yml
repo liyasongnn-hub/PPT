@@ -113,8 +113,8 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY}
-    cap_drop:
-      - ALL
+    tmpfs:
+      - /root/.mc:size=16m,noexec,nosuid
     pids_limit: 64
 
   migration:
