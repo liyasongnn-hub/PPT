@@ -41,7 +41,6 @@ services:
     tmpfs:
       - /run/postgresql:size=64m,noexec,nosuid
       - /tmp:size=64m,noexec,nosuid
-    read_only: true
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 10s
