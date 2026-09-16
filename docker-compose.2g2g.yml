@@ -39,3 +39,13 @@ services:
 
   outline_api:
     mem_limit: 512m
+
+  # 前端：2GB 内存上 vite build 会 OOM（V8 堆需 ~800MB 加构建环境超 1.6Gi），
+  # 故本 overlay 放弃在服务器上构建前端，改用 nginx 镜像直接挂载「本地预构建产物」。
+  # 产物已由部署者在本机 `npm run build-only` 生成并 scp 到 /opt/ppt-agent/frontend/dist。
+  frontend:
+    build: null
+    image: nginx:stable-alpine
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html:ro
+      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
