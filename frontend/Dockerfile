@@ -10,7 +10,9 @@ RUN npm ci
 
 # 拷贝源代码并构建
 COPY . .
-RUN npm run build
+# 生产部署只做 vite 构建，跳过 vue-tsc 全量类型检查（本地 CI 已覆盖 type-check），
+# 以降低低内存服务器（2GB）上的构建峰值，避免 OOM。
+RUN npm run build-only
 
 # Stage 2: Serve with Nginx
 FROM nginx:stable-alpine
