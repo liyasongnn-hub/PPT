@@ -171,16 +171,27 @@ async def DocumentSearch(
     if metadata is None:
         metadata = {}
     start_time = time.time()
-    results = sogou_weixin_search(keyword)
+    try:
+        results = sogou_weixin_search(keyword)
+    except Exception as e:
+        logger.warning("搜狗微信搜索失败(降级为空): %s", e)
+        return f"没有搜索到{keyword}相关的文章"
     if not results:
         return f"没有搜索到{keyword}相关的文章"
     articles = []
     results = results[:number]
     for every_result in results:
         sougou_link = every_result["link"]
-        real_url = get_real_url(sougou_link)
-        # referer：请求来源
-        content = get_article_content(real_url, referer=sougou_link)
+        # 单个环节失败则跳过该条，不让一篇坏文章阻塞整页生成
+        try:
+            real_url = get_real_url(sougou_link)
+            # referer：请求来源
+            content = get_article_content(real_url, referer=sougou_link)
+        except Exception as e:
+            logger.warning("解析文章失败(跳过): %s", e)
+            continue
+        if not content or content.startswith("获取文章内容失败"):
+            continue
         article = {
             "title": every_result["title"],
             "publish_time": every_result["publish_time"],

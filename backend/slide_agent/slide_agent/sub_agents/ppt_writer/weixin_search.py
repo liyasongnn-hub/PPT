@@ -38,7 +38,7 @@ def sogou_weixin_search(query: str) -> List[Dict[str, str]]:
     }
 
     try:
-        response = requests.get('https://weixin.sogou.com/weixin', params=params, headers=headers)
+        response = requests.get('https://weixin.sogou.com/weixin', params=params, headers=headers, timeout=10)
 
         if response.status_code == 200:
             tree = html.fromstring(response.text)
@@ -85,7 +85,7 @@ def get_real_url(sogou_url: str) -> str:
     }
 
     try:
-        response = requests.get(sogou_url, headers=headers)
+        response = requests.get(sogou_url, headers=headers, timeout=10)
 
         script_content = response.text
         start_index = script_content.find("url += '") + len("url += '")
@@ -125,7 +125,7 @@ def get_article_content(real_url: str, referer: str) -> str:
     }
 
     try:
-        response = requests.get(real_url, headers=headers)
+        response = requests.get(real_url, headers=headers, timeout=10)
         tree = html.fromstring(response.text)
         content_elements = tree.xpath("//div[@id='js_content']//text()")
         cleaned_content = [text.strip() for text in content_elements if text.strip()]
